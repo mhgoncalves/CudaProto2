@@ -156,7 +156,8 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
   <ItemGroup>
     <ClInclude Include="adc_graph.cuh" />
     <ClInclude Include="book.h" />
-    <ClInclude Include="hash_cuda.cuh" />
+    <ClInclude Include="hash_cpu.cuh" />
+    <ClInclude Include="hash_gpu.cuh" />
     <ClInclude Include="lock.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

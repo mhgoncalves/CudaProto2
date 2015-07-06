@@ -1,7 +1,6 @@
 #ifndef __ADC_GRAPH_CUH__
 #define __ADC_GRAPH_CUH__
 
-
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 
@@ -10,197 +9,232 @@
 #include <sstream>
 #include <iostream>
 
-#include <map>
-#include "adc_graph.cuh"
-#include "hash_cuda.cuh"
+#include "hash_gpu.cuh"
+#include "hash_cpu.cuh"
 
 
-#define ADC_FILE_BUFFER 1024
-
-
-struct adcNode
+struct NodoCPU
 {
-	long ID;
-	__host__ __device__ adcNode() { ID = -1; };
-	__host__ __device__ adcNode(long newID) { ID = newID; };
+	long key;
+	hash_cpu<long> Edges;
+	long& operator=(const long& _a) {
+		this->key = _a;
+		return (this->key);
+	};
+	~NodoCPU() {
+		Edges.Clear();
+	}
 };
 
-struct adcEdge
+struct NodoGPU
 {
-	long idParent, idChild;
-	__host__ __device__ adcEdge() { idParent = -1; idChild = -1; };
-	__host__ __device__ adcEdge(long NodeP, long NodeC) { idParent = NodeP; idChild = NodeC; };
+	long key;
+	hash_gpu<long> Edges;
+	long& operator=(const long& _a) {
+		this->key = _a;
+		return (this->key);
+	};
+	~NodoGPU() {
+		Edges.Clear();
+	}
 };
 
 
 class adcGraph
 {
 public:
-	__host__ __device__ adcGraph();
-	__host__ __device__ ~adcGraph();
+//	__host__ __device__ adcGraph();
+//	__host__ __device__ ~adcGraph();
 
-	__host__ __device__ const thrust::host_vector<adcNode*>* Host_Nodes() { return &_hstNodes; };
-	__host__ __device__ const thrust::host_vector<adcEdge*>* Host_Edges() { return &_hstEdges; };
-	__host__ __device__ void Host_AddNode(long newID);
-	__host__ __device__ void Host_AddEdge(long NodeP, long NodeC);
-	__host__ __device__ void Host_ToDevice();
 
-	__host__ __device__ const thrust::device_vector<adcNode*>* Device_Nodes() { return &_dvcNodes; };
-	__host__ __device__ const thrust::device_vector<adcEdge*>* Device_Edges() { return &_dvcEdges; };
-	__host__ __device__ void Device_AddNode(long newID);
-	__host__ __device__ void Device_AddEdge(long NodeP, long NodeC);
-	__host__ __device__ void Device_ToHost();
+	__host__ __device__ void Host_addNode(long u);
+	__host__ __device__ void Host_addEdge(long u, long v, long qtd);
+	__host__ __device__ void Host_Clear();
+	__host__ __device__ hash_cpu<NodoCPU>* Host_Nodes();
+	__host__ __device__ void Host_to_Device();
 
-	__host__ __device__ thrust::device_vector<adcEdge*>* Device_GetEdges(long NodeID);
-	__host__ __device__ void getRandomV(adcGraph* pGraph);
+	__host__ __device__ void Device_addNode(long u);
+	__host__ __device__ void Device_addEdge(long u, long v, long qtd);
+	__host__ __device__ void Device_Clear();
+	__host__ __device__ hash_gpu<NodoGPU>* Device_Nodes();
+
+	__host__ __device__ long Size();
+	__host__ __device__ void Initialize(long qtdEntries);
+	__host__ __device__ void LoadRandomGraph(adcGraph* pGraph, int SubGraphSize);
+	__host__ __device__ void LoadDiffGraph(adcGraph* G, adcGraph* A);
+
+
+
+
 
 private:
-	thrust::device_vector<adcNode*> _dvcNodes;
-	thrust::device_vector<adcEdge*> _dvcEdges;
-
-	thrust::host_vector<adcNode*> _hstNodes;
-	thrust::host_vector<adcEdge*> _hstEdges;
-
-	hash_cuda _dvcHashNodes;
-	hash_cuda _dvcHashEdges;
-
-	__host__ __device__ void Host_Clear();
-	__host__ __device__ void Device_Clear();
+	long _QtdNodos;
+	hash_gpu<NodoGPU> _dvcNodes;
+	hash_cpu<NodoCPU> _hstNodes;
 };
 
-__host__ __device__ adcGraph::adcGraph()
+__host__ __device__ long adcGraph::Size()
 {
-	_dvcNodes.clear();
-	_dvcEdges.clear();
-	_hstNodes.clear();
-	_hstEdges.clear();
+	return _QtdNodos;
 }
 
-__host__ __device__ adcGraph::~adcGraph()
+
+__host__ __device__ hash_cpu<NodoCPU>* adcGraph::Host_Nodes()
 {
-	this->Host_Clear();
-	this->Device_Clear();
+	return &_hstNodes;
 }
 
-__host__ __device__ void adcGraph::Host_AddNode(long newID)
+__host__ __device__ hash_gpu<NodoGPU>* adcGraph::Device_Nodes()
 {
-	_hstNodes. push_back( new adcNode(newID) );
+	return &_dvcNodes;
 }
 
-__host__ __device__ void adcGraph::Host_AddEdge(long NodeP, long NodeC)
-{
-	_hstEdges.push_back( new adcEdge(NodeP, NodeC) );
-}
 
-__host__ __device__ void adcGraph::Host_ToDevice()
+__host__ __device__ void adcGraph::Host_addNode(long u)
 {
-	this->Device_Clear();
-	for (long i = 0; i < _hstNodes.size(); i++) {
-		this->Device_AddNode(_hstNodes[i]->ID);
+	NodoCPU* pU = _hstNodes.Find(u);
+	// Se necessario adiciona o Nodo u...
+	if (pU->key != u && pU->Edges.Size() < 1) {
+		_hstNodes.Add(u);
+		pU = _hstNodes.Find(u);
 	}
-	for (long i = 0; i < _hstEdges.size(); i++) {
-		this->Device_AddEdge(_hstEdges[i]->idParent, _hstEdges[i]->idChild);
+}
+
+__host__ __device__ void adcGraph::Host_addEdge(long u, long v, long qtd)
+{
+	NodoCPU* pU = _hstNodes.Find(u);
+
+	// Se necessario adiciona o Nodo u...
+	if (pU->key != u && !pU->Edges.Prepared()) {
+		_hstNodes.Add(u);
+		pU = _hstNodes.Find(u);
+	}
+
+	// Se necessario inicia o vetor de Arestas do Nodo u...
+	if (pU->key == u && !pU->Edges.Prepared()) {
+		pU->Edges.Initialize(qtd);
+	}
+
+	// Se necessario adiciona ao Nodo u a Aresta v...
+	if (pU->key == u && pU->Edges.Prepared()) {
+		long* pV = pU->Edges.Find(v);
+		if ((*pV)!=v)
+			pU->Edges.Add(v);
 	}
 }
 
 __host__ __device__ void adcGraph::Host_Clear()
 {
-	while (!_hstNodes.empty()) {
-		delete _hstNodes.back();
-		_hstNodes.pop_back();
-	}
-	while (!_hstEdges.empty()) {
-		delete _hstEdges.back();
-		_hstEdges.pop_back();
+	_hstNodes.Clear();
+}
+
+__host__ __device__ void adcGraph::Device_addNode(long u)
+{
+	NodoGPU* pU = _dvcNodes.Find(u);
+
+	// Se necessario adiciona o Nodo u...
+	if (pU->key != u && !pU->Edges.Prepared()) {
+		_dvcNodes.Add(u);
+		pU = _dvcNodes.Find(u);
 	}
 }
 
-
-__host__ __device__ void adcGraph::Device_AddNode(long newID)
+__host__ __device__ void adcGraph::Device_addEdge(long u, long v, long qtd)
 {
-	adcNode* pNewNode;
-	cudaMalloc(&pNewNode, sizeof(adcNode));
-	pNewNode->ID = newID;
-	_dvcNodes.push_back(pNewNode);
-}
+	NodoGPU* pU = _dvcNodes.Find(u);
 
-__host__ __device__ void adcGraph::Device_AddEdge(long NodeP, long NodeC)
-{
-	adcEdge* pNewEdge;
-	cudaMalloc(&pNewEdge, sizeof(adcEdge));
-	pNewEdge->idParent = NodeP;
-	pNewEdge->idChild  = NodeC;
-	_dvcEdges.push_back(pNewEdge);
-}
-
-__host__ __device__ void adcGraph::Device_ToHost()
-{
-	this->Host_Clear();
-	for (long i = 0; i < _dvcNodes.size(); i++) {
-		adcNode* pNode = _dvcNodes[i];
-		this->Host_AddNode(pNode->ID);
+	// Se necessario adiciona o Nodo u...
+	if (pU->key != u && !pU->Edges.Prepared()) {
+		_dvcNodes.Add(u);
+		pU = _dvcNodes.Find(u);
 	}
-	for (long i = 0; i < _dvcEdges.size(); i++) {
-		adcEdge* pEdge = _dvcEdges[i];
-		this->Host_AddEdge(pEdge->idParent, pEdge->idChild);
+
+	// Se necessario inicia o vetor de Arestas do Nodo u...
+	if (pU->key == u && !pU->Edges.Prepared()) {
+		pU->Edges.Initialize(qtd);
+	}
+
+	// Se necessario adiciona ao Nodo u a Aresta v...
+	if (pU->key == u && pU->Edges.Prepared()) {
+		long* pV = pU->Edges.Find(v);
+		if ((*pV) != v)
+			pU->Edges.Add(v);
 	}
 }
 
 __host__ __device__ void adcGraph::Device_Clear()
 {
-	while (!_dvcNodes.empty()) {
-		adcNode* pDelNode = _dvcNodes.back();
-		_dvcNodes.pop_back();
-		cudaFree(pDelNode);
-	}
-	while (!_dvcEdges.empty()) {
-		adcEdge* pDelEdge = _dvcEdges.back();
-		_dvcEdges.pop_back();
-		cudaFree(pDelEdge);
-	}
+	_dvcNodes.Clear();
 }
 
 
-__host__ __device__ thrust::device_vector<adcEdge*>* adcGraph::Device_GetEdges(long NodeID)
+
+__host__ __device__ void adcGraph::Initialize(long qtdNodos)
 {
-	thrust::device_vector<adcEdge*>* pEdges;
-	cudaMalloc(&pEdges, sizeof(thrust::device_vector<adcEdge*>));
-	for (long i = 0; i < _dvcEdges.size(); i++) {
-		adcEdge* pEdge = _dvcEdges[i];
-		if (pEdge->idParent == NodeID) {
-			pEdges->push_back(pEdge);
-		}
-	}
-	return pEdges;
+	_QtdNodos = qtdNodos;
+	_hstNodes.Initialize(_QtdNodos);
+//	_dvcNodes.Initialize(_QtdNodos);
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////
 // Inicializa o grafo pegando um vértice aleatório de G.
 ////////////////////////////////////////////////////////////////////////////////
-__host__ __device__ void adcGraph::getRandomV(adcGraph* pGraph)
+__host__ __device__ void adcGraph::LoadRandomGraph(adcGraph* pGraph,int SubGraphSize)
 {
 	// Iniciando o grafo.
 	this->Host_Clear();
-	this->Device_Clear();
 
-	// Recuperando a posicao "aleatoria".
-	long NodePos = rand() % pGraph->Device_Nodes()->size();
+	// Recuperando a posicao "aleatoria"...
+	NodoCPU* Nodo = pGraph->Host_Nodes()->Rand();
 
-	// Recuperando o Vértice e suas Arestas.
-	adcNode* pNode = (*pGraph->Device_Nodes())[NodePos];
-	thrust::device_vector<adcEdge*>* pEdges = this->Device_GetEdges(pNode->ID);
-
-	// Adicionando o Vértice e suas Arestas.
-	this->Device_AddNode(pNode->ID);
-	for (long i = 0; i < pEdges->size(); i++) {
-		adcEdge* pEdge = (*pEdges)[i];
-		this->Host_AddEdge(pEdge->idParent, pEdge->idChild);
+	// Adicionando o Nodo recuperado à memoria do Host...
+	this->Initialize(pGraph->Size());
+	for (long i = 0; i < Nodo->Edges.Size(); i++) {
+		this->Host_addEdge(Nodo->key, (*Nodo->Edges.Pos(i)), Nodo->Edges.Size());
 	}
 
-	// Copiando memória do Device para o Host.
-	this->Device_ToHost();
-	cudaFree(pEdges);
+	// Copiando do Host para o Device...
+	this->Host_to_Device();
+}
+
+
+__host__ __device__ void adcGraph::Host_to_Device()
+{
+	// Limpando e preparando a memoria do Device...
+	this->Device_Clear();
+	_dvcNodes.Initialize(_hstNodes.Size());
+
+	// Copiando Nodo a Nodo...
+	for (long i = 0; i < _hstNodes.Size(); i++) {
+		NodoCPU* Nodo = _hstNodes.Pos(i);
+		for (long j = 0; j < Nodo->Edges.Size(); j++) {
+			this->Device_addEdge( Nodo->key, (*Nodo->Edges.Pos(j)), Nodo->Edges.Size());
+		}
+	}
+}
+
+
+__host__ __device__ void adcGraph::LoadDiffGraph(adcGraph* G, adcGraph* A)
+{
+	// Iniciando o grafo.
+	this->Host_Clear();
+	hash_cpu<NodoCPU>* NodosG = G->Host_Nodes();
+	NodoCPU* NodoA = A->Host_Nodes()->Pos(0);
+	this->Initialize(G->Size());
+
+	// Copiando Nodo a Nodo...
+	for (long i = 0; i < NodosG->Size(); i++) {
+		NodoCPU* Nodo = NodosG->Pos(i);
+		if (Nodo->key != NodoA->key) {
+			for (long j = 0; j < Nodo->Edges.Size(); j++) {
+				this->Host_addEdge(Nodo->key, (*Nodo->Edges.Pos(j)), Nodo->Edges.Size());
+			}
+		}
+	}
+
+	// Copiando do Host para o Device...
+	this->Host_to_Device();
 }
 
 
