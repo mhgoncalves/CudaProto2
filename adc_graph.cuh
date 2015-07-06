@@ -4,11 +4,6 @@
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 
-#include <stdio.h>
-#include <fstream>
-#include <sstream>
-#include <iostream>
-
 #include "hash_gpu.cuh"
 #include "hash_cpu.cuh"
 
@@ -46,38 +41,53 @@ public:
 //	__host__ __device__ adcGraph();
 //	__host__ __device__ ~adcGraph();
 
-
+	__host__ __device__ bool Host_Contains(long u);
 	__host__ __device__ void Host_addNode(long u);
 	__host__ __device__ void Host_addEdge(long u, long v, long qtd);
 	__host__ __device__ void Host_Clear();
 	__host__ __device__ hash_cpu<NodoCPU>* Host_Nodes();
 	__host__ __device__ void Host_to_Device();
 
+	__host__ __device__ bool Device_Contains(long u);
 	__host__ __device__ void Device_addNode(long u);
 	__host__ __device__ void Device_addEdge(long u, long v, long qtd);
 	__host__ __device__ void Device_Clear();
 	__host__ __device__ hash_gpu<NodoGPU>* Device_Nodes();
 
 	__host__ __device__ long Size();
+	__host__ __device__ long getEdgeCount();
 	__host__ __device__ void Initialize(long qtdEntries);
-	__host__ __device__ void LoadRandomGraph(adcGraph* pGraph, int SubGraphSize);
-	__host__ __device__ void LoadDiffGraph(adcGraph* G, adcGraph* A);
 
 
 
+	__device__ long GetNode(long U, int tid);
 
 
 private:
-	long _QtdNodos;
+	long _QtdNodes;
+	long _QtdEdges;
+
 	hash_gpu<NodoGPU> _dvcNodes;
 	hash_cpu<NodoCPU> _hstNodes;
 };
 
-__host__ __device__ long adcGraph::Size()
+
+__device__ long adcGraph::GetNode(long U, int tid)
 {
-	return _QtdNodos;
+	return (*_dvcNodes.Find(U)->Edges.Find(tid));
 }
 
+
+__host__ __device__ long adcGraph::Size()
+{
+	return _QtdNodes;
+}
+
+
+__host__ __device__ long adcGraph::getEdgeCount()
+{
+	return _QtdEdges;
+}
 
 __host__ __device__ hash_cpu<NodoCPU>* adcGraph::Host_Nodes()
 {
@@ -87,6 +97,13 @@ __host__ __device__ hash_cpu<NodoCPU>* adcGraph::Host_Nodes()
 __host__ __device__ hash_gpu<NodoGPU>* adcGraph::Device_Nodes()
 {
 	return &_dvcNodes;
+}
+
+
+__host__ __device__ bool adcGraph::Host_Contains(long u)
+{
+	NodoCPU* pU = _hstNodes.Find(u);
+	return (!pU && pU->key == u);;
 }
 
 
@@ -118,8 +135,10 @@ __host__ __device__ void adcGraph::Host_addEdge(long u, long v, long qtd)
 	// Se necessario adiciona ao Nodo u a Aresta v...
 	if (pU->key == u && pU->Edges.Prepared()) {
 		long* pV = pU->Edges.Find(v);
-		if ((*pV)!=v)
+		if ((*pV) != v) {
 			pU->Edges.Add(v);
+			_QtdEdges++;
+		}
 	}
 }
 
@@ -127,6 +146,14 @@ __host__ __device__ void adcGraph::Host_Clear()
 {
 	_hstNodes.Clear();
 }
+
+
+__host__ __device__ bool adcGraph::Device_Contains(long u)
+{
+	NodoGPU* pU = _dvcNodes.Find(u);
+	return (!pU && pU->key == u);;
+}
+
 
 __host__ __device__ void adcGraph::Device_addNode(long u)
 {
@@ -171,31 +198,9 @@ __host__ __device__ void adcGraph::Device_Clear()
 
 __host__ __device__ void adcGraph::Initialize(long qtdNodos)
 {
-	_QtdNodos = qtdNodos;
-	_hstNodes.Initialize(_QtdNodos);
-//	_dvcNodes.Initialize(_QtdNodos);
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-// Inicializa o grafo pegando um vértice aleatório de G.
-////////////////////////////////////////////////////////////////////////////////
-__host__ __device__ void adcGraph::LoadRandomGraph(adcGraph* pGraph,int SubGraphSize)
-{
-	// Iniciando o grafo.
-	this->Host_Clear();
-
-	// Recuperando a posicao "aleatoria"...
-	NodoCPU* Nodo = pGraph->Host_Nodes()->Rand();
-
-	// Adicionando o Nodo recuperado à memoria do Host...
-	this->Initialize(pGraph->Size());
-	for (long i = 0; i < Nodo->Edges.Size(); i++) {
-		this->Host_addEdge(Nodo->key, (*Nodo->Edges.Pos(i)), Nodo->Edges.Size());
-	}
-
-	// Copiando do Host para o Device...
-	this->Host_to_Device();
+	_QtdNodes = qtdNodos;
+	_QtdEdges = 0;
+	_hstNodes.Initialize(_QtdNodes);
 }
 
 
@@ -209,33 +214,13 @@ __host__ __device__ void adcGraph::Host_to_Device()
 	for (long i = 0; i < _hstNodes.Size(); i++) {
 		NodoCPU* Nodo = _hstNodes.Pos(i);
 		for (long j = 0; j < Nodo->Edges.Size(); j++) {
-			this->Device_addEdge( Nodo->key, (*Nodo->Edges.Pos(j)), Nodo->Edges.Size());
+			this->Device_addEdge(Nodo->key, (*Nodo->Edges.Pos(j)), Nodo->Edges.Size());
 		}
 	}
 }
 
 
-__host__ __device__ void adcGraph::LoadDiffGraph(adcGraph* G, adcGraph* A)
-{
-	// Iniciando o grafo.
-	this->Host_Clear();
-	hash_cpu<NodoCPU>* NodosG = G->Host_Nodes();
-	NodoCPU* NodoA = A->Host_Nodes()->Pos(0);
-	this->Initialize(G->Size());
 
-	// Copiando Nodo a Nodo...
-	for (long i = 0; i < NodosG->Size(); i++) {
-		NodoCPU* Nodo = NodosG->Pos(i);
-		if (Nodo->key != NodoA->key) {
-			for (long j = 0; j < Nodo->Edges.Size(); j++) {
-				this->Host_addEdge(Nodo->key, (*Nodo->Edges.Pos(j)), Nodo->Edges.Size());
-			}
-		}
-	}
-
-	// Copiando do Host para o Device...
-	this->Host_to_Device();
-}
 
 
 #endif
