@@ -70,8 +70,8 @@ template<class TPT> __host__ __device__ void hash_gpu<TPT>::Initialize(long qtdE
 {
 	_Prepared = true;
 	_Count = qtdEntries;
-	HANDLE_ERROR(cudaMalloc(&_pEntries, _Count*sizeof(TPT)));
-	HANDLE_ERROR(cudaMemset(_pEntries, 0, _Count*sizeof(TPT)));
+	HANDLE_ERROR( cudaMalloc( &_pEntries   , _Count*sizeof(TPT) ));
+	HANDLE_ERROR( cudaMemset(  _pEntries, 0, _Count*sizeof(TPT) ));
 }
 
 template<class TPT> __host__ __device__ void hash_gpu<TPT>::Del(long key)

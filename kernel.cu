@@ -10,11 +10,24 @@
 
 #define SIZE_THREADS 8
 
-__host__ void PrintGraph(adcGraph *G, std::string stg)
+__host__ __device__ void PrintGraph_Host(adcGraph *G, std::string stg)
 {
-	std::cout << "Grafo [" << stg << "] " << G->Size() << std::endl;
+	std::cout << "Grafo Host [" << stg << "] " << G->Size() << std::endl;
 	for (int i = 0; i<G->Size(); i++) {
 		NodoCPU* Nodo = G->Host_Nodes()->Pos(i);
+		std::cout << Nodo->key;
+		for (int j = 0; j<Nodo->Edges.Size(); j++) {
+			std::cout << (*Nodo->Edges.Pos(j));
+		}
+		std::cout << std::endl;
+	}
+}
+
+__host__ __device__ void PrintGraph_Device(adcGraph *G, std::string stg)
+{
+	std::cout << "Grafo Device [" << stg << "] " << G->Size() << std::endl;
+	for (int i = 0; i<G->Size(); i++) {
+		NodoGPU* Nodo = G->Device_Nodes()->Pos(i);
 		std::cout << Nodo->key;
 		for (int j = 0; j<Nodo->Edges.Size(); j++) {
 			std::cout << (*Nodo->Edges.Pos(j));
@@ -198,7 +211,7 @@ __global__ void ADC(adcGraph* G, adcGraph* A, adcGraph* B, adcGraph* remainingEd
 	RemEdgesT->Device_LinkGraph(remainingEdges);
 
 	// Recupera um Nodo em B para o processamento da Thread corrente...
-	NodoGPU* Nodo = B->Device_Nodes()->Find(tid);
+	NodoGPU* Nodo = B->ThreadLockNode(tid);
 	if (!Nodo) return;
 	long u = Nodo->key;
 	
@@ -239,14 +252,25 @@ int main()
 	LoadDiffGraph(&B, &G, &A);
 
 	// Debug...
-	PrintGraph(&G, "G");
-	PrintGraph(&A, "A");
-	PrintGraph(&B, "B");
+	PrintGraph_Host(&G, "G");
+	PrintGraph_Host(&A, "A");
+	PrintGraph_Host(&B, "B");
 
 	G.Host_to_Device();
-	A.Host_to_Device();
-	B.Host_to_Device();
+	PrintGraph_Device(&G, "G");
 
+	A.Host_to_Device();
+	PrintGraph_Device(&A, "A");
+
+	B.Host_to_Device();
+	PrintGraph_Device(&B, "B");
+
+	// Debug...
+	PrintGraph_Device(&G, "G");
+	PrintGraph_Device(&A, "A");
+	PrintGraph_Device(&B, "B");
+
+	B.PrepareThreadsLocks(SIZE_THREADS);
 
 	// Cria o grafo com as arestas entre A e B
 	adcGraph* abEdges = getABEdges_Host(&G, &A, &B);

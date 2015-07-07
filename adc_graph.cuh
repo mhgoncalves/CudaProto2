@@ -6,13 +6,14 @@
 
 #include "hash_gpu.cuh"
 #include "hash_cpu.cuh"
+#include "book.h"
 
 
 struct NodoCPU
 {
 	long key;
 	hash_cpu<long> Edges;
-	long& operator=(const long& _a) {
+	__host__ __device__ long& operator=(const long& _a) {
 		if (_a == 0) {
 			for (int i = 0; i < Edges.Size(); i++) {
 				(*Edges.Pos(i)) = 0;
@@ -21,10 +22,10 @@ struct NodoCPU
 		this->key = _a;
 		return (this->key);
 	}
-	bool operator==(const long& _Right) {
+	__host__ __device__ bool operator==(const long& _Right) {
 		return  this->key == _Right;
 	}
-	~NodoCPU() {
+	__host__ __device__ ~NodoCPU() {
 		Edges.Clear();
 	}
 };
@@ -33,7 +34,7 @@ struct NodoGPU
 {
 	long key;
 	hash_gpu<long> Edges;
-	long& operator=(const long& _a) {
+	__host__ __device__ long& operator=(const long& _a) {
 		if (_a == 0) {
 			for (int i = 0; i < Edges.Size(); i++) {
 				(*Edges.Pos(i)) = 0;
@@ -42,10 +43,10 @@ struct NodoGPU
 		this->key = _a;
 		return (this->key);
 	}
-	bool operator==(const long& _Right) {
+	__host__ __device__ bool operator==(const long& _Right) {
 		return  this->key == _Right;
 	}
-	~NodoGPU() {
+	__host__ __device__ ~NodoGPU() {
 		Edges.Clear();
 	}
 };
@@ -83,6 +84,9 @@ public:
 	__host__ __device__ void Host_to_Device();
 	__host__ __device__ void Device_to_Host();
 
+	__host__   void PrepareThreadsLocks(int sizeThreads);
+	__device__ NodoGPU* ThreadLockNode(int tid);
+
 	__device__ void Device_LinkGraph(adcGraph* link);
 	__host__   void Host_CommitToLink();
 
@@ -91,6 +95,8 @@ private:
 	long _QtdNodes;
 	adcGraph* _LinkGraph;
 	hash_gpu<NodoGPU> _LogLinkDels;
+	long* _ThreadLock;
+	int _sizeThreads;
 
 	hash_gpu<NodoGPU> _dvcNodes;
 	hash_cpu<NodoCPU> _hstNodes;
@@ -98,11 +104,13 @@ private:
 
 __host__ __device__ adcGraph::adcGraph()
 {
-	_QtdNodes  = 0;
-	_LinkGraph = 0;
-	_LogLinkDels.Clear();
+	_QtdNodes    = 0;
+	_LinkGraph   = 0;
+	_ThreadLock  = 0;
+	_sizeThreads = 0;
 	_dvcNodes.Clear();
 	_hstNodes.Clear();
+	_LogLinkDels.Clear();
 }
 
 __host__ __device__ adcGraph::~adcGraph()
@@ -110,6 +118,9 @@ __host__ __device__ adcGraph::~adcGraph()
 	_LogLinkDels.Clear();
 	_dvcNodes.Clear();
 	_hstNodes.Clear();
+	if (_ThreadLock) {
+		HANDLE_ERROR( cudaFree(_ThreadLock) );
+	}
 }
 
 
@@ -419,6 +430,20 @@ __host__ __device__ void adcGraph::Device_to_Host()
 	}
 }
 
+
+__host__ void adcGraph::PrepareThreadsLocks(int sizeThreads)
+{
+	_sizeThreads = sizeThreads;
+	HANDLE_ERROR( cudaMalloc(&_ThreadLock   , _sizeThreads*sizeof(long) ));
+	HANDLE_ERROR( cudaMemset( _ThreadLock, 0, _sizeThreads*sizeof(long) ));
+}
+
+__device__ NodoGPU* adcGraph::ThreadLockNode(int tid)
+{
+	long      NextNodo = _ThreadLock[tid] + (_dvcNodes.Size() % _sizeThreads);
+	NodoGPU*  Nodo     = _dvcNodes.Pos( NextNodo );
+	return Nodo;
+}
 
 __device__ void adcGraph::Device_LinkGraph(adcGraph* link)
 {
