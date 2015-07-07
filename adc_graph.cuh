@@ -20,7 +20,10 @@ struct NodoCPU
 		}				
 		this->key = _a;
 		return (this->key);
-	};
+	}
+	bool operator==(const long& _Right) {
+		return  this->key == _Right;
+	}
 	~NodoCPU() {
 		Edges.Clear();
 	}
@@ -38,7 +41,10 @@ struct NodoGPU
 		}
 		this->key = _a;
 		return (this->key);
-	};
+	}
+	bool operator==(const long& _Right) {
+		return  this->key == _Right;
+	}
 	~NodoGPU() {
 		Edges.Clear();
 	}
@@ -154,23 +160,27 @@ __host__ __device__ bool adcGraph::Host_Contains(long u)
 
 __host__ __device__ void adcGraph::Host_addNode(long u)
 {
-	NodoCPU* pU = _hstNodes.Find(u);
+/*	NodoCPU* pU = _hstNodes.Find(u);
 	// Se necessario adiciona o Nodo u...
 	if (pU->key != u && pU->Edges.Size() < 1) {
 		_hstNodes.Add(u);
 		pU = _hstNodes.Find(u);
-	}
+	}*/
+	_hstNodes.Add(u);
 }
 
 __host__ __device__ void adcGraph::Host_addEdge(long u, long v, long qtd)
 {
+	NodoCPU* pU = _hstNodes.Add(u);
+
+/*	// Se necessario adiciona o Nodo u...
 	NodoCPU* pU = _hstNodes.Find(u);
 
 	// Se necessario adiciona o Nodo u...
-	if (pU->key != u && !pU->Edges.Prepared()) {
+	if (!pU->key != u && !pU->Edges.Prepared()) {
 		_hstNodes.Add(u);
 		pU = _hstNodes.Find(u);
-	}
+	}*/
 
 	// Se necessario inicia o vetor de Arestas do Nodo u...
 	if (pU->key == u && !pU->Edges.Prepared()) {
@@ -179,10 +189,9 @@ __host__ __device__ void adcGraph::Host_addEdge(long u, long v, long qtd)
 
 	// Se necessario adiciona ao Nodo u a Aresta v...
 	if (pU->key == u && pU->Edges.Prepared()) {
-		long* pV = pU->Edges.Find(v);
-		if ((*pV) != v) {
+//		long* pV = pU->Edges.Find(v);
+//		if ((*pV) != v)
 			pU->Edges.Add(v);
-		}
 	}
 }
 
@@ -278,47 +287,51 @@ __host__ __device__ void adcGraph::Device_delNode(long u)
 {
 	// Se não possuir link com outro Grafo, então é necessário efetuar o log dos excluídos...
 	if (_LinkGraph) {
+		NodoGPU* NodoDel  = _LogLinkDels.Find(u);
+		NodoGPU* NodoLink = _LinkGraph->Device_Nodes()->Find(u);
 
 		// Verifica se o Nodo u já foi adicionado ao log dos excluídos...
-		NodoGPU* Nodo = _LogLinkDels.Find(u);
-		if (Nodo && Nodo->key != u && !Nodo->Edges.Prepared()) {
+		if (NodoDel  &&  NodoDel->key!=u &&  !NodoDel->Edges.Prepared() &&
+			NodoLink && NodoLink->key==u &&  NodoLink->Edges.Prepared() ){
 
 			// Adiciona o Nodo u ao log dos excluídos...
-			_LogLinkDels.Add(u);
-			Nodo = _LogLinkDels.Find(u);
-			long qtd = _LinkGraph->Device_Nodes()->Find(u)->Edges.Size();
-			Nodo->Edges.Initialize(qtd);
+			NodoDel = _LogLinkDels.Add(u);
+//			NodoDel = _LogLinkDels.Find(u);
+			long qtd = NodoLink->Edges.Size();
+			NodoDel->Edges.Initialize(qtd);
 
 			// Adiciona as Arestas do Nodo u ao logo dos excluídos...
-			for (long j = 0; j < Nodo->Edges.Size(); j++) {
-				long v = (*_LinkGraph->Device_Nodes()->Find(u)->Edges.Pos(j));
-				Nodo->Edges.Add(v);
+			for (long j = 0; j < NodoDel->Edges.Size(); j++) {
+				long v = (*NodoLink->Edges.Pos(j));
+				NodoDel->Edges.Add(v);
 			}
 		}
 	}
-//	_dvcNodes.Del(u);
 }
 
 __host__ __device__ void adcGraph::Device_addNode(long u)
 {
-	NodoGPU* pU = _dvcNodes.Find(u);
-
+/*	NodoGPU* pU = _dvcNodes.Find(u);
 	// Se necessario adiciona o Nodo u...
 	if (pU->key != u && !pU->Edges.Prepared()) {
 		_dvcNodes.Add(u);
 		pU = _dvcNodes.Find(u);
-	}
+	}*/
+	_dvcNodes.Add(u);
 }
 
 __host__ __device__ void adcGraph::Device_addEdge(long u, long v, long qtd)
 {
+	NodoGPU* pU = _dvcNodes.Add(u);
+
+/*	// Se necessario adiciona o Nodo u...
 	NodoGPU* pU = _dvcNodes.Find(u);
 
 	// Se necessario adiciona o Nodo u...
 	if (pU->key != u && !pU->Edges.Prepared()) {
 		_dvcNodes.Add(u);
 		pU = _dvcNodes.Find(u);
-	}
+	}*/
 
 	// Se necessario inicia o vetor de Arestas do Nodo u...
 	if (pU->key == u && !pU->Edges.Prepared()) {
@@ -327,8 +340,8 @@ __host__ __device__ void adcGraph::Device_addEdge(long u, long v, long qtd)
 
 	// Se necessario adiciona ao Nodo u a Aresta v...
 	if (pU->key == u && pU->Edges.Prepared()) {
-		long* pV = pU->Edges.Find(v);
-		if ((*pV) != v)
+//		long* pV = pU->Edges.Find(v);
+//		if ((*pV) != v)
 			pU->Edges.Add(v);
 	}
 }
@@ -337,29 +350,25 @@ __host__ __device__ void adcGraph::Device_delEdge(long u, long v)
 {
 	// Se não possuir link com outro Grafo, então é necessário efetuar o log dos excluídos...
 	if (_LinkGraph) {
+		NodoGPU* NodoDel  = _LogLinkDels.Find(u);
+		NodoGPU* NodoLink = _LinkGraph->Device_Nodes()->Find(u);
+		if ( NodoLink && NodoLink->key==u &&  NodoLink->Edges.Prepared() ) {
 
-		// Verifica se é necessário adicionar o Nodo u ao log dos excluídos...
-		NodoGPU* Nodo = _LogLinkDels.Find(u);
-		if (Nodo && Nodo->key != u && !Nodo->Edges.Prepared()) {
-			_LogLinkDels.Add(u);
-			Nodo = _LogLinkDels.Find(u);
-			long qtd = _LinkGraph->Device_Nodes()->Find(u)->Edges.Size();
-			Nodo->Edges.Initialize(qtd);
-		}
+			// Verifica se é necessário adicionar o Nodo u ao log dos excluídos...
+			if ( NodoDel && NodoDel->key!=u && !NodoDel->Edges.Prepared() ) {
+				NodoDel = _LogLinkDels.Add(u);
+//				NodoDel = _LogLinkDels.Find(u);
+				long qtd = NodoLink->Edges.Size();
+				NodoDel->Edges.Initialize(qtd);
+			}
 
-		// Adicionanto a Aresta ao log dos excluídos...
-		long* pV = _LinkGraph->Device_Nodes()->Find(u)->Edges.Find(v);
-		if (pV && (*pV) == v) {
-			Nodo->Edges.Add(v);
+			// Adicionanto a Aresta ao log dos excluídos...
+			long* pV = NodoLink->Edges.Find(v);
+			if (pV && (*pV) == v) {
+				NodoDel->Edges.Add(v);
+			}
 		}
 	}
-/*	NodoGPU* pU = _dvcNodes.Find(u);
-	if ( pU && pU->key==u ) {
-		long* pV = pU->Edges.Find(v);
-		if ( pV && (*pV)==v ) {
-			(*pV) = 0;
-		}
-	}*/
 }
 
 __host__ __device__ void adcGraph::Device_Clear()
@@ -385,8 +394,10 @@ __host__ __device__ void adcGraph::Host_to_Device()
 	// Copiando Nodo a Nodo...
 	for (long i = 0; i < _hstNodes.Size(); i++) {
 		NodoCPU* Nodo = _hstNodes.Pos(i);
-		for (long j = 0; j < Nodo->Edges.Size(); j++) {
-			this->Device_addEdge(Nodo->key, (*Nodo->Edges.Pos(j)), Nodo->Edges.Size());
+		if ( Nodo && Nodo->Edges.Prepared() ) {
+			for (long j = 0; j < Nodo->Edges.Size(); j++) {
+				this->Device_addEdge(Nodo->key, (*Nodo->Edges.Pos(j)), Nodo->Edges.Size());
+			}
 		}
 	}
 }
@@ -400,8 +411,10 @@ __host__ __device__ void adcGraph::Device_to_Host()
 	// Copiando Nodo a Nodo...
 	for (long i = 0; i < _dvcNodes.Size(); i++) {
 		NodoGPU* Nodo = _dvcNodes.Pos(i);
-		for (long j = 0; j < Nodo->Edges.Size(); j++) {
-			this->Host_addEdge(Nodo->key, (*Nodo->Edges.Pos(j)), Nodo->Edges.Size());
+		if (Nodo && Nodo->Edges.Prepared()) {
+			for (long j = 0; j < Nodo->Edges.Size(); j++) {
+				this->Host_addEdge(Nodo->key, (*Nodo->Edges.Pos(j)), Nodo->Edges.Size());
+			}
 		}
 	}
 }
@@ -457,7 +470,7 @@ __host__  void adcGraph::Host_CommitToLink()
 			
 			// Senão, se o Link não possuir o Nodo, entao temos adicioná-lo ao Link... Bem como todas as Arestas do Nodo...
 			} else {
-				_LinkGraph->Device_addNode(u);
+//				_LinkGraph->Device_addNode(u);
 				for (long j = 0; j < Nodo->Edges.Size(); j++) {
 					long v = (*Nodo->Edges.Pos(j));
 					if ( v>0 ) {

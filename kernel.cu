@@ -242,7 +242,7 @@ int main()
 	PrintGraph(&G, "G");
 	PrintGraph(&A, "A");
 	PrintGraph(&B, "B");
-/*
+
 	G.Host_to_Device();
 	A.Host_to_Device();
 	B.Host_to_Device();
@@ -285,7 +285,7 @@ int main()
 		}
 
 	}
-	*/
+	
 	return 0;
 }
 
