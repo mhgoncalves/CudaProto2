@@ -208,7 +208,7 @@ __host__ __device__ long adcGraph::Device_getEdgeCount()
 		}
 	}
 
-	// Se não possuir link com outro Grafo, então é necessário mais processamento...
+	// Se possuir link com outro Grafo, então é necessário mais processamento...
 	if (_LinkGraph) {
 
 		// Somando as Arestas do grafo Link...
@@ -241,8 +241,37 @@ __host__ __device__ long adcGraph::Device_getEdgeCount()
 
 __host__ __device__ bool adcGraph::Device_Contains(long u)
 {
-	NodoGPU* pU = _dvcNodes.Find(u);
-	return (!pU && pU->key == u);;
+	bool bRet = false;
+	
+	// Se possuir link com outro Grafo, então é necessário mais processamento...
+	if (_LinkGraph) {
+
+		// Primeiro, verificando se o Nodo u foi adicionado no corrente...
+		NodoGPU* pU = _dvcNodes.Find(u);
+		bRet = (!pU && pU->key == u);
+
+		// Segundo, se necessário, verificando se o Nodo u foi marcado como exluído no corrente...
+		if (!bRet) {
+			pU = pU = _LogLinkDels.Find(u);
+			bRet = (!pU && pU->key == u);
+
+			// Terceiro, se necessário, verificando se o Nodo u está presente no Link...
+			if (!bRet) {
+				pU = _LinkGraph->Device_Nodes()->Find(u);
+				bRet = (!pU && pU->key == u);
+			} else {
+				// Se o Nodo u foi achado entre os excluídos, então ele não está no grafo...
+				bRet = !bRet;
+			}
+		}
+
+	// Se NÃO possuir link com outro Grafo, então basta verificar na própria tabela Hash do Device...
+	} else {
+		NodoGPU* pU = _dvcNodes.Find(u);
+		bRet = (!pU && pU->key == u);
+	}
+
+	return bRet;
 }
 
 __host__ __device__ void adcGraph::Device_delNode(long u)
@@ -388,33 +417,59 @@ __device__ void adcGraph::Device_LinkGraph(adcGraph* link)
 
 __host__  void adcGraph::Host_CommitToLink()
 {
-	// Avaliando cada Nodo do Link em relação ao Device...
-	for (long i = 0; i < _LinkGraph->Device_Nodes()->Size(); i++) {
-		NodoGPU* Nodo = _LinkGraph->Device_Nodes()->Pos(i);
-		long u = Nodo->key;
+	// Verificando se o grafo possui link... Apenas uma segurança a mais...
+	if (_LinkGraph) {
 
-		// Se o Device não possuir o Nodo, entao temos que apagar o Nodo do Link...
-		if (!this->Device_Contains(u)) {
-			_LinkGraph->Device_delNode(u);
-		}
-	}
+		// PRIMEIRO: avaliando as EXCLUSÕES feitas no Device que devem ser replicadas para o Link...
+		for (long i = 0; i < _LogLinkDels.Size(); i++) {
+			NodoGPU* Nodo = _LogLinkDels.Pos(i);
+			long u = Nodo->key;
+			long qtdDel = 0;
 
-	// Avaliando cada Nodo do Device em relação ao Link...
-	for (long i = 0; i < _dvcNodes.Size(); i++) {
-		NodoGPU* Nodo = _dvcNodes.Pos(i);
-		long u = Nodo->key;
-
-		// Se o Link não possuir o Nodo, entao temos que adicionar o Nodo ao Link...
-		if (!_LinkGraph->Device_Contains(u)) {
+			// Apagando cada Aresta de exclusão do Nodo u...
 			for (long j = 0; j < Nodo->Edges.Size(); j++) {
 				long v = (*Nodo->Edges.Pos(j));
-				_LinkGraph->Device_addEdge(u, v, Nodo->Edges.Size());
+				if (v > 0) {
+					_LinkGraph->Device_Nodes()->Find(u)->Edges.Del(v);
+					qtdDel++;
+				}
+			}
+
+			// Se todas as Arestas foram excluídas, então tratava-se de uma exclusão de Nodo...
+			if (qtdDel == Nodo->Edges.Size()){
+				_LinkGraph->Device_Nodes()->Del(u);
 			}
 		}
-	}
 
-	// Aplicando as alterações no Device do Link para o seu Host...
-	_LinkGraph->Device_to_Host();
+		// SEGUNDO: avaliando as INCLUSÕES feitas no Device que devem ser replicadas para o Link...
+		for (long i = 0; i < _dvcNodes.Size(); i++) {
+			NodoGPU* Nodo = _dvcNodes.Pos(i);
+			long u = Nodo->key;
+
+			// Se o Link possuir o Nodo, entao temos que avaliar cada Aresta do Nodo...
+			if (_LinkGraph->Device_Contains(u)) {
+				for (long j = 0; j < Nodo->Edges.Size(); j++) {
+					long v = (*Nodo->Edges.Pos(j));
+					if (v>0 && (*_LinkGraph->Device_Nodes()->Find(u)->Edges.Find(v))<v ) {
+						_LinkGraph->Device_addEdge(u, v, Nodo->Edges.Size());
+					}
+				}
+			
+			// Senão, se o Link não possuir o Nodo, entao temos adicioná-lo ao Link... Bem como todas as Arestas do Nodo...
+			} else {
+				_LinkGraph->Device_addNode(u);
+				for (long j = 0; j < Nodo->Edges.Size(); j++) {
+					long v = (*Nodo->Edges.Pos(j));
+					if ( v>0 ) {
+						_LinkGraph->Device_addEdge(u, v, Nodo->Edges.Size());
+					}
+				}
+			}
+		}
+
+		// TERCEIRO: aplicando as operações feitas no Link do seu Device para o seu Host...
+		_LinkGraph->Device_to_Host();
+	}
 }
 
 

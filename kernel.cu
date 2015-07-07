@@ -85,7 +85,9 @@ __host__ void LoadRandomGraph(adcGraph *G, adcGraph *A, int SubGraphSize)
 	A->Initialize( G->Size() );
 	for (int i = 0; i < Nodos.size(); i++) {
 		for (int j = 0; j < Nodos[i]->Edges.Size(); j++) {
-			A->Host_addEdge(Nodos[i]->key, (*Nodos[i]->Edges.Pos(j)), Nodos[i]->Edges.Size());
+			long u = Nodos[i]->key;
+			long v = (*Nodos[i]->Edges.Pos(j));
+			A->Host_addEdge(u, v, Nodos[i]->Edges.Size());
 		}
 	}
 }
@@ -122,7 +124,7 @@ __host__ adcGraph* getABEdges_Host(adcGraph* G, adcGraph* A, adcGraph* B)
 	return tmp;
 }
 
-__device__ adcGraph* getABEdges_Device(adcGraph* G, adcGraph* A, adcGraph* B)
+__device__ adcGraph* getABEdges_Device(adcGraph* G, adcGraph* At, adcGraph* Bt)
 {
 	adcGraph* tmp = new adcGraph();
 	tmp->Initialize( G->Size() );
@@ -132,7 +134,7 @@ __device__ adcGraph* getABEdges_Device(adcGraph* G, adcGraph* A, adcGraph* B)
 		for (int j = 0; j<Nodo->Edges.Size(); j++) {
 			long u = Nodo->key;
 			long v = (*Nodo->Edges.Pos(j));
-			if ((A->Device_Contains(u) && B->Device_Contains(v)) || (A->Device_Contains(v) && B->Device_Contains(u))) {
+			if ((At->Device_Contains(u) && Bt->Device_Contains(v)) || (At->Device_Contains(v) && Bt->Device_Contains(u))) {
 				tmp->Device_addEdge(u, v, Nodo->Edges.Size());
 			}
 		}
@@ -141,10 +143,10 @@ __device__ adcGraph* getABEdges_Device(adcGraph* G, adcGraph* A, adcGraph* B)
 	return tmp;
 }
 
-__host__ double calculateCN_Host( adcGraph* graphA, adcGraph* graphB, adcGraph* abEdges )
+__host__ double calculateCN_Host( adcGraph* A, adcGraph* B, adcGraph* abEdges )
 {
-	double eAA = graphA->Host_getEdgeCount();
-	double eBB = graphB->Host_getEdgeCount();
+	double eAA = A->Host_getEdgeCount();
+	double eBB = B->Host_getEdgeCount();
 	double eAB = abEdges->Host_getEdgeCount();
 	double K   = eAA / (eAA + eAB);
 	double eA  = eAA + eAB;
@@ -153,10 +155,10 @@ __host__ double calculateCN_Host( adcGraph* graphA, adcGraph* graphB, adcGraph* 
 	return K - ((eA * eB) / ((eA * eA) + (eA * eB)));
 }
 
-__device__ double calculateCN_Device(adcGraph* graphA, adcGraph* graphB, adcGraph* abEdges)
+__device__ double calculateCN_Device(adcGraph* At, adcGraph* Bt, adcGraph* abEdges)
 {
-	double eAA = graphA->Device_getEdgeCount();
-	double eBB = graphB->Device_getEdgeCount();
+	double eAA = At->Device_getEdgeCount();
+	double eBB = Bt->Device_getEdgeCount();
 	double eAB = abEdges->Device_getEdgeCount();
 	double K = eAA / (eAA + eAB);
 	double eA = eAA + eAB;
@@ -182,7 +184,6 @@ __device__ void ProcessRemainingEdges_On_Device(long u, adcGraph* RemEdgesT, adc
 		}
 	}
 }
-
 
 __global__ void ADC(adcGraph* G, adcGraph* A, adcGraph* B, adcGraph* remainingEdges, adcGraph* pAt, adcGraph* pBt, double* pCNt, adcGraph* pRemEdgesT)
 {
@@ -229,7 +230,6 @@ __global__ void ADC(adcGraph* G, adcGraph* A, adcGraph* B, adcGraph* remainingEd
 
 
 
-
 int main()
 {
 	// Carregando os Grafos G, A, B...
@@ -239,10 +239,10 @@ int main()
 	LoadDiffGraph(&B, &G, &A);
 
 	// Debug...
-/*	PrintGraph(&G, "G");
+	PrintGraph(&G, "G");
 	PrintGraph(&A, "A");
-	PrintGraph(&B, "B"); //*/
-
+	PrintGraph(&B, "B");
+/*
 	G.Host_to_Device();
 	A.Host_to_Device();
 	B.Host_to_Device();
@@ -278,10 +278,6 @@ int main()
 				Bt[i].Host_CommitToLink();
 				RemEdgesT[i].Host_CommitToLink();
 
-//				A.Device_to_Host();
-//				B.Device_to_Host();
-//				remainingEdges.Device_to_Host();
-
 				delete abEdges;
 				abEdges = getABEdges_Host(&G, &A, &B); // Theta(V+E)
 				CN      = calculateCN_Host(&A, &B, abEdges);
@@ -289,7 +285,7 @@ int main()
 		}
 
 	}
-
+	*/
 	return 0;
 }
 
