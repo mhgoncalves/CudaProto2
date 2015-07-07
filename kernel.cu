@@ -23,16 +23,17 @@ __host__ __device__ void PrintGraph_Host(adcGraph *G, std::string stg)
 	}
 }
 
-__host__ __device__ void PrintGraph_Device(adcGraph *G, std::string stg)
+__global__ void PrintGraph_Device(adcGraph *G, std::string stg)
 {
-	std::cout << "Grafo Device [" << stg << "] " << G->Size() << std::endl;
+	printf("\nGrafo Device [%s] %d\n", stg, G->Size());
+
 	for (int i = 0; i<G->Size(); i++) {
 		NodoGPU* Nodo = G->Device_Nodes()->Pos(i);
-		std::cout << Nodo->key;
+		printf("%d ", Nodo->key);
 		for (int j = 0; j<Nodo->Edges.Size(); j++) {
-			std::cout << (*Nodo->Edges.Pos(j));
+			printf("%d ", (*Nodo->Edges.Pos(j)) );
 		}
-		std::cout << std::endl;
+		printf("\n");
 	}
 }
 
@@ -257,18 +258,18 @@ int main()
 	PrintGraph_Host(&B, "B");
 
 	G.Host_to_Device();
-	PrintGraph_Device(&G, "G");
+	PrintGraph_Device<<<1,1>>>(&G, "G");
+	cudaDeviceSynchronize();
 
 	A.Host_to_Device();
-	PrintGraph_Device(&A, "A");
+	PrintGraph_Device<<<1,1>>>(&A, "A");
+	cudaDeviceSynchronize();
 
 	B.Host_to_Device();
-	PrintGraph_Device(&B, "B");
+	PrintGraph_Device<<<1,1>>>(&B, "B");
+	cudaDeviceSynchronize();
 
 	// Debug...
-	PrintGraph_Device(&G, "G");
-	PrintGraph_Device(&A, "A");
-	PrintGraph_Device(&B, "B");
 
 	B.PrepareThreadsLocks(SIZE_THREADS);
 

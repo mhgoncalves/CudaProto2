@@ -20,9 +20,10 @@ private:
 public:
 	__host__ __device__ hash_gpu() {
 		_Prepared = false;
-		_Count = 0;
+		_Count    = 0;
 		_pEntries = 0;
 	};
+	__host__ __device__ TPT* ExposeHash() { return _pEntries; };
 
 	__host__ __device__ void Clear();
 	__host__ __device__ void Initialize(long qtdEntries);
@@ -63,15 +64,15 @@ template<class TPT> __host__ __device__ void hash_gpu<TPT>::Clear()
 {
 	HANDLE_ERROR( cudaFree(_pEntries) );
 	_Prepared = false;
-	_Count = 0;
+	_Count    = 0;
 }
 
 template<class TPT> __host__ __device__ void hash_gpu<TPT>::Initialize(long qtdEntries)
 {
-	_Prepared = true;
 	_Count = qtdEntries;
-	HANDLE_ERROR( cudaMalloc( &_pEntries   , _Count*sizeof(TPT) ));
+	HANDLE_ERROR( cudaMalloc( &_pEntries,    _Count*sizeof(TPT) ));
 	HANDLE_ERROR( cudaMemset(  _pEntries, 0, _Count*sizeof(TPT) ));
+	_Prepared = true;
 }
 
 template<class TPT> __host__ __device__ void hash_gpu<TPT>::Del(long key)

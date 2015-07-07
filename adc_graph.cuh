@@ -71,7 +71,7 @@ public:
 	__host__ __device__ void Device_addNode(long u);
 	__host__ __device__ void Device_addEdge(long u, long v, long qtd);
 	__host__ __device__ void Device_delEdge(long u, long v);
-	__host__ __device__ void Device_Clear();
+	__host__  void Device_Clear();
 	__host__ __device__ hash_gpu<NodoGPU>* Device_Nodes();
 
 	__host__ __device__ long Size();
@@ -81,8 +81,8 @@ public:
 	__device__ long GetNode(long U, int tid);
 
 
-	__host__ __device__ void Host_to_Device();
-	__host__ __device__ void Device_to_Host();
+	__host__ void Host_to_Device();
+	__host__ void Device_to_Host();
 
 	__host__   void PrepareThreadsLocks(int sizeThreads);
 	__device__ NodoGPU* ThreadLockNode(int tid);
@@ -382,12 +382,22 @@ __host__ __device__ void adcGraph::Device_delEdge(long u, long v)
 	}
 }
 
-__host__ __device__ void adcGraph::Device_Clear()
+__global__ void DeviceClear( NodoGPU* HashDevice, long HashSize )
 {
-	_dvcNodes.Clear();
+	for (int i = 0; i<HashSize; i++) {
+		if (HashDevice[i].Edges.Prepared()) {
+			HashDevice[i].Edges.Clear();
+		}
+	}
 }
-
-
+__host__ void adcGraph::Device_Clear()
+{
+	if ( _dvcNodes.Prepared() ) {
+		DeviceClear<<<1,1>>>(_dvcNodes.ExposeHash(), _dvcNodes.Size());
+		cudaDeviceSynchronize();
+		_dvcNodes.Clear();
+	}
+}
 
 __host__ __device__ void adcGraph::Initialize(long qtdNodos)
 {
@@ -396,13 +406,40 @@ __host__ __device__ void adcGraph::Initialize(long qtdNodos)
 }
 
 
-__host__ __device__ void adcGraph::Host_to_Device()
+__global__ void Initialize_Edges_On_Device(hash_gpu<long>* DeviceEdgesObj, long SizeEdge, long* BridgeEdgesDevice)
+{
+	DeviceEdgesObj->Initialize(SizeEdge);
+	long* HashEdgesDevice = DeviceEdgesObj->ExposeHash();
+	memcpy(&HashEdgesDevice, &BridgeEdgesDevice, SizeEdge*sizeof(long));
+}
+
+__host__ void adcGraph::Host_to_Device()
 {
 	// Limpando e preparando a memoria do Device...
 	this->Device_Clear();
 	_dvcNodes.Initialize(_hstNodes.Size());
 
-	// Copiando Nodo a Nodo...
+	long     SizeNodo   = _hstNodes.Size();
+	NodoCPU* HashHost   = _hstNodes.ExposeHash();
+	NodoGPU* HashDevice = _dvcNodes.ExposeHash();
+
+	for (int i=0; i<SizeNodo; i++) {
+		HANDLE_ERROR( cudaMemcpy( &HashDevice[i].key, &HashHost[i].key, sizeof(long), cudaMemcpyHostToDevice ));
+
+		long* BridgeEdgesDevice = 0;
+		long  SizeEdge = HashHost[i].Edges.Size();
+		HANDLE_ERROR(cudaMalloc(&BridgeEdgesDevice, SizeEdge*sizeof(long)));
+
+		long* HashEdgesHost     = HashHost[i].Edges.ExposeHash();
+
+		HANDLE_ERROR( cudaMemcpy(&BridgeEdgesDevice, &HashEdgesHost, SizeEdge*sizeof(long), cudaMemcpyHostToDevice) );
+
+		Initialize_Edges_On_Device<<<1,1>>>( &HashDevice[i].Edges, SizeEdge, BridgeEdgesDevice );
+		cudaDeviceSynchronize();
+
+		HANDLE_ERROR( cudaFree(BridgeEdgesDevice) );
+	}
+/*	// Copiando Nodo a Nodo...
 	for (long i = 0; i < _hstNodes.Size(); i++) {
 		NodoCPU* Nodo = _hstNodes.Pos(i);
 		if ( Nodo && Nodo->Edges.Prepared() ) {
@@ -411,9 +448,10 @@ __host__ __device__ void adcGraph::Host_to_Device()
 			}
 		}
 	}
+*/
 }
 
-__host__ __device__ void adcGraph::Device_to_Host()
+__host__ void adcGraph::Device_to_Host()
 {
 	// Limpando e preparando a memoria do Device...
 	this->Host_Clear();
