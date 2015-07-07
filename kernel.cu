@@ -8,8 +8,9 @@
 #include <sstream>
 #include <iostream>
 
+#define SIZE_THREADS 8
 
-void PrintGraph(adcGraph *G, std::string stg)
+__host__ void PrintGraph(adcGraph *G, std::string stg)
 {
 	std::cout << "Grafo [" << stg << "] " << G->Size() << std::endl;
 	for (int i = 0; i<G->Size(); i++) {
@@ -22,7 +23,7 @@ void PrintGraph(adcGraph *G, std::string stg)
 	}
 }
 
-void ReadGraphFromFile(char const* cFilePathName, adcGraph *pGraph)
+__host__ void ReadGraphFromFile(char const* cFilePathName, adcGraph *pGraph)
 {
 	std::ifstream oFile(cFilePathName);
 	std::string str;
@@ -66,7 +67,7 @@ void ReadGraphFromFile(char const* cFilePathName, adcGraph *pGraph)
 	oFile.close();
 }
 
-void LoadRandomGraph( adcGraph *G, adcGraph *A, int SubGraphSize )
+__host__ void LoadRandomGraph(adcGraph *G, adcGraph *A, int SubGraphSize)
 {
 	// Recuperando em G um Nodo aleatorio...
 	std::vector<NodoCPU*> Nodos;
@@ -89,7 +90,7 @@ void LoadRandomGraph( adcGraph *G, adcGraph *A, int SubGraphSize )
 	}
 }
 
-void LoadDiffGraph( adcGraph *B, adcGraph *G, adcGraph *A )
+__host__ void LoadDiffGraph(adcGraph *B, adcGraph *G, adcGraph *A)
 {
 	B->Initialize( G->Size() );
 	for ( int i=0; i<G->Size(); i++ ) {
@@ -102,46 +103,10 @@ void LoadDiffGraph( adcGraph *B, adcGraph *G, adcGraph *A )
 	}
 }
 
-__global__ void ADC( adcGraph* A, adcGraph* B )
-{
-/*	adcGraph Al, Bl;
-	int tid = blockIdx.x + threadIdx.x;
-	long V = B->GetNode(tid);
-	Bl->Device_delEges(V);
-	Bl->Device_delNode(V);
-	Al->Device_addNode(V);
-	Al->Device_addEges(V,A);
-	NodoGPU* pNodo = B->Device_Nodes()->Find(tid);
-/*
-			Integer u = itr.next();
-			graphA.addVertex(u);
-			// Tenta adicionar as arestas remanescentes ao grafo
-			this.addRemainingEdges(u, remainingEdges, graphA);
-			Set<Edge> adjU = graphB.getAdjEdges(u);
-			if (adjU != null) {
-				Iterator<Edge> itrE = adjU.iterator();
-				while (itrE.hasNext()) { // Theta(E)
-					Edge e = itrE.next();
-					// Se existir o outro o vertice da aresta, insere em A
-					if (graphA.contains(e.v())) {
-						graphA.addEdge(e, true);
-					} else {
-						// Caso contrario, coloca na lista de remanescente
-						addRemainingEdge(e.u(), e.v(), remainingEdges);
-						addRemainingEdge(e.v(), e.u(), remainingEdges);
-					}
-				}
-				graphB.removeVertex(u);
-			}
-			double newCN = this.calculateCN(graphA, graphB, abEdges); // Theta(V+E)
-*/
-}
-
-
-adcGraph* getABEdges(adcGraph* G, adcGraph* A, adcGraph* B)
+__host__ adcGraph* getABEdges_Host(adcGraph* G, adcGraph* A, adcGraph* B)
 {
 	adcGraph* tmp = new adcGraph();
-	tmp->Initialize(A->Size());
+	tmp->Initialize( G->Size() );
 
 	for (int i = 0; i<G->Size(); i++) {
 		NodoCPU* Nodo = G->Host_Nodes()->Pos(i);
@@ -157,17 +122,125 @@ adcGraph* getABEdges(adcGraph* G, adcGraph* A, adcGraph* B)
 	return tmp;
 }
 
-
-__host__ __device__ double calculateCN(adcGraph* graphA, adcGraph* graphB, adcGraph* abEdges)
+__device__ adcGraph* getABEdges_Device(adcGraph* G, adcGraph* A, adcGraph* B)
 {
-	double eAA = graphA->getEdgeCount();
-	double eBB = graphB->getEdgeCount();
-	double eAB = abEdges->getEdgeCount();
+	adcGraph* tmp = new adcGraph();
+	tmp->Initialize( G->Size() );
+
+	for (int i = 0; i<G->Size(); i++) {
+		NodoGPU* Nodo = G->Device_Nodes()->Pos(i);
+		for (int j = 0; j<Nodo->Edges.Size(); j++) {
+			long u = Nodo->key;
+			long v = (*Nodo->Edges.Pos(j));
+			if ((A->Device_Contains(u) && B->Device_Contains(v)) || (A->Device_Contains(v) && B->Device_Contains(u))) {
+				tmp->Device_addEdge(u, v, Nodo->Edges.Size());
+			}
+		}
+	}
+
+	return tmp;
+}
+
+__host__ double calculateCN_Host( adcGraph* graphA, adcGraph* graphB, adcGraph* abEdges )
+{
+	double eAA = graphA->Host_getEdgeCount();
+	double eBB = graphB->Host_getEdgeCount();
+	double eAB = abEdges->Host_getEdgeCount();
+	double K   = eAA / (eAA + eAB);
+	double eA  = eAA + eAB;
+	double eB  = eBB + eAB;
+
+	return K - ((eA * eB) / ((eA * eA) + (eA * eB)));
+}
+
+__device__ double calculateCN_Device(adcGraph* graphA, adcGraph* graphB, adcGraph* abEdges)
+{
+	double eAA = graphA->Device_getEdgeCount();
+	double eBB = graphB->Device_getEdgeCount();
+	double eAB = abEdges->Device_getEdgeCount();
 	double K = eAA / (eAA + eAB);
 	double eA = eAA + eAB;
 	double eB = eBB + eAB;
+
 	return K - ((eA * eB) / ((eA * eA) + (eA * eB)));
 }
+
+
+
+
+/*
+__host__ __device__ void addRemainingEdge( long u, long v, adcGraph* remainingEdges )
+{
+	if (remainingEdges-> containsKey(u))
+		remainingEdges.get(u).add(v);
+	else {
+		HashSet<Integer> set = new HashSet<Integer>();
+		set.add(v);
+		remainingEdges.put(u, set);
+	}
+}
+*/
+__device__ void ProcessRemainingEdges_On_Device(long u, adcGraph* remainingEdges, adcGraph* graph)
+{
+	NodoGPU* Nodo = remainingEdges->Device_Nodes()->Find(u);
+	if (!Nodo)
+		return;
+
+	// Tentar adicionar as Arestas do Nodo ao grafo...
+	for (int i = 0; i < Nodo->Edges.Size(); i++) {
+		long v = (*Nodo->Edges.Pos(i));
+
+		// Se existir em A o outro Nodo da Aresta, entao insere a Aresta em A...
+		if (graph->Device_Contains(v)) {
+			graph->Device_addEdge(u, v, Nodo->Edges.Size());
+			remainingEdges->Device_delEdge(u, v);
+		}
+	}
+}
+
+
+__global__ void ADC(adcGraph* G, adcGraph* A, adcGraph* B, adcGraph* remainingEdges, adcGraph** pAt, adcGraph** pBt, double** pCNt, adcGraph** pRemEdgesT)
+{
+	int tid = blockIdx.x + threadIdx.x;
+	adcGraph *At = pAt[tid];
+	adcGraph *Bt = pBt[tid];
+	adcGraph *RemEdgesT = pRemEdgesT[tid];
+
+	At->Device_LinkGraph(A);
+	Bt->Device_LinkGraph(B);
+	RemEdgesT->Device_LinkGraph(remainingEdges);
+
+
+	// Recupera um Nodo em B para uma thread específica...
+	NodoGPU* Nodo = B->Device_Nodes()->Find(tid);
+	if (!Nodo) return;
+	long u = Nodo->key;
+	
+	// Adiciona o Nodo da thread, e tenta adicionar as Arestas remanescentes deste Nodo a A...
+	At->Device_addNode( u );
+	ProcessRemainingEdges_On_Device(u, RemEdgesT, At);
+
+	// Tentar adicionar as Arestas do Nodo a A...
+	for (int i = 0; i < Nodo->Edges.Size(); i++) {
+		long v = (*Nodo->Edges.Pos(i));
+
+		// Se existir em A o outro Nodo da Aresta, entao insere a Aresta em A...
+		if (At->Device_Contains(v)) {
+			At->Device_addEdge(u, v, Nodo->Edges.Size() );
+//		} else {
+//			// Caso contrario, coloca a Aresta na lista de remanescente...
+//			addRemainingEdge( u, v, remainingEdges );
+		}
+	}
+	Bt->Device_delNode(u);
+
+	adcGraph* abEdges = getABEdges_Device(G, At, Bt);
+	(*pCNt[tid])      = calculateCN_Device(At, Bt, abEdges); // Theta(V+E)
+	delete abEdges;
+//	double CNt = calculateCN( At, Bt, abEdges ); // Theta(V+E)
+}
+
+
 
 
 int main()
@@ -183,31 +256,51 @@ int main()
 	PrintGraph(&A, "A");
 	PrintGraph(&B, "B"); //*/
 
+	G.Host_to_Device();
+	A.Host_to_Device();
+	B.Host_to_Device();
+
+
 	// Cria o grafo com as arestas entre A e B
-	adcGraph* abEdges = getABEdges( G, A, B );
-	double CN         = calculateCN( A, B, abEdges );
+	adcGraph* abEdges = getABEdges_Host(&G, &A, &B);
+	double CN         = calculateCN_Host( &A, &B, abEdges );
 
 	// Guarda as arestas removidas de B e que nao foram inseridas em A
-	//HashMap<Integer, HashSet<Integer>> remainingEdges = new HashMap<Integer, HashSet<Integer>>();
+//	HashMap<Integer, HashSet<Integer>> remainingEdges = new HashMap<Integer, HashSet<Integer>>();
 	adcGraph remainingEdges;
 
-	Set<Integer> verticesInB = new HashSet<Integer>(graphB.getVertices());
-	Iterator<Integer> itr = verticesInB.iterator();
 
 	// Para cada vertice em B, faz sua insercao em A e verifica se a
 	// condutancia normalizada aumentou. Em caso positivo, prossegue
-	while (itr.hasNext()) { // Theta(V)
-		ADC <<<1,3>>>(&A,&B);
+//	Set<Integer> verticesInB = new HashSet<Integer>(graphB.getVertices());
+//	Iterator<Integer> itr = verticesInB.iterator();
+	bool Continuar = true;
+	while (Continuar) { // Theta(V)
+		adcGraph At[SIZE_THREADS], Bt[SIZE_THREADS], RemEdgesT[SIZE_THREADS];
+		double  CNt[SIZE_THREADS];
 
-		if (newCN > CN) {
-			CN = newCN;
-		} else {
-			A.removeVertex(u);
-			B.addVertex(u);
-			if (adjU != null)
-				B.addEdges(adjU, true);
+		ADC<<<1,SIZE_THREADS>>>(&G, &A, &B, &remainingEdges, &At, &Bt, &CNt, &RemEdgesT);
+
+		// Procurando por um novo CN...
+		Continuar = false;
+		for (int i = 0; i < SIZE_THREADS; i++) {
+			if (CNt[i]>CN) {
+				// Se um novo CN foi achado, então processa a copia dos novos grafos A e B...
+				Continuar = true;
+				At[i].Host_CommitToLink();
+				Bt[i].Host_CommitToLink();
+				RemEdgesT[i].Host_CommitToLink();
+
+				A.Device_to_Host();
+				B.Device_to_Host();
+				remainingEdges.Device_to_Host();
+
+				delete abEdges;
+				abEdges = getABEdges_Host(&G, &A, &B); // Theta(V+E)
+				CN      = calculateCN_Host(&A, &B, abEdges);
+			}
 		}
-		abEdges = getABEdges(G, A, B); // Theta(V+E)
+
 	}
 
 	return 0;

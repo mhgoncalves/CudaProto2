@@ -20,6 +20,7 @@ public:
 	__host__ __device__ long GetHash(long key);
 	__host__ __device__ void Clear();
 	__host__ __device__ void Initialize(long qtdEntries);
+	__host__ __device__ void Del(long key);
 	__host__ __device__ void Add(long key);
 	__host__ __device__ TPT* Find(long key);
 	__host__ __device__ TPT* Rand();
@@ -46,6 +47,12 @@ template<class TPT> __host__ __device__ void hash_cpu<TPT>::Initialize(long qtdE
 	_Prepared = true;
 	_Count    = qtdEntries;
 	_pEntries = (TPT*)calloc(_Count, sizeof(TPT));
+}
+
+template<class TPT> __host__ __device__ void hash_cpu<TPT>::Del(long key)
+{
+	long hashValue = this->GetHash(key);
+	_pEntries[hashValue] = 0;
 }
 
 template<class TPT> __host__ __device__ void hash_cpu<TPT>::Add(long key)

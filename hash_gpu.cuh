@@ -25,9 +25,11 @@ public:
 	__host__ __device__ void Clear();
 	__host__ __device__ void Initialize(long qtdEntries);
 	__host__ __device__ void Add(long key);
+	__host__ __device__ void Del(long key);
 	__host__ __device__ TPT* Find(long key);
 	__host__ __device__ long Size();
 	__host__ __device__ bool Prepared();
+	__host__ __device__ TPT* Pos(long pos);
 };
 
 
@@ -51,6 +53,12 @@ template<class TPT> __host__ __device__ void hash_gpu<TPT>::Initialize(long qtdE
 	HANDLE_ERROR(cudaMemset(_pEntries, 0, _Count*sizeof(TPT)));
 }
 
+template<class TPT> __host__ __device__ void hash_gpu<TPT>::Del(long key)
+{
+	long hashValue = this->GetHash(key);
+	_pEntries[hashValue] = 0;
+}
+
 template<class TPT> __host__ __device__ void hash_gpu<TPT>::Add(long key)
 {
 	long hashValue = this->GetHash(key);
@@ -71,6 +79,11 @@ template<class TPT> __host__ __device__ long hash_gpu<TPT>::Size()
 template<class TPT> __host__ __device__ bool hash_gpu<TPT>::Prepared()
 {
 	return _Prepared;
+}
+
+template<class TPT> __host__ __device__ TPT* hash_gpu<TPT>::Pos(long pos)
+{
+	return &_pEntries[pos];
 }
 
 #endif
