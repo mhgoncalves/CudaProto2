@@ -165,79 +165,66 @@ __device__ double calculateCN_Device(adcGraph* graphA, adcGraph* graphB, adcGrap
 	return K - ((eA * eB) / ((eA * eA) + (eA * eB)));
 }
 
-
-
-
-/*
-__host__ __device__ void addRemainingEdge( long u, long v, adcGraph* remainingEdges )
+__device__ void ProcessRemainingEdges_On_Device(long u, adcGraph* RemEdgesT, adcGraph* At)
 {
-	if (remainingEdges-> containsKey(u))
-		remainingEdges.get(u).add(v);
-	else {
-		HashSet<Integer> set = new HashSet<Integer>();
-		set.add(v);
-		remainingEdges.put(u, set);
-	}
-}
-*/
-__device__ void ProcessRemainingEdges_On_Device(long u, adcGraph* remainingEdges, adcGraph* graph)
-{
-	NodoGPU* Nodo = remainingEdges->Device_Nodes()->Find(u);
+	NodoGPU* Nodo = RemEdgesT->Device_Nodes()->Find(u);
 	if (!Nodo)
 		return;
 
 	// Tentar adicionar as Arestas do Nodo ao grafo...
-	for (int i = 0; i < Nodo->Edges.Size(); i++) {
+	for (int i=0; i<Nodo->Edges.Size(); i++) {
 		long v = (*Nodo->Edges.Pos(i));
 
 		// Se existir em A o outro Nodo da Aresta, entao insere a Aresta em A...
-		if (graph->Device_Contains(v)) {
-			graph->Device_addEdge(u, v, Nodo->Edges.Size());
-			remainingEdges->Device_delEdge(u, v);
+		if (v>0 && At->Device_Contains(v)) {
+			At->Device_addEdge(u, v, Nodo->Edges.Size());
+			RemEdgesT->Device_delEdge(u, v);
 		}
 	}
 }
 
 
-__global__ void ADC(adcGraph* G, adcGraph* A, adcGraph* B, adcGraph* remainingEdges, adcGraph** pAt, adcGraph** pBt, double** pCNt, adcGraph** pRemEdgesT)
+__global__ void ADC(adcGraph* G, adcGraph* A, adcGraph* B, adcGraph* remainingEdges, adcGraph* pAt, adcGraph* pBt, double* pCNt, adcGraph* pRemEdgesT)
 {
 	int tid = blockIdx.x + threadIdx.x;
-	adcGraph *At = pAt[tid];
-	adcGraph *Bt = pBt[tid];
-	adcGraph *RemEdgesT = pRemEdgesT[tid];
+	adcGraph *At = &pAt[tid];
+	adcGraph *Bt = &pBt[tid];
+	adcGraph *RemEdgesT = &pRemEdgesT[tid];
 
+	// Conecta os grafos At e Bt, e seus remanescentes, da Thread com a memoria compartilhada...
 	At->Device_LinkGraph(A);
 	Bt->Device_LinkGraph(B);
 	RemEdgesT->Device_LinkGraph(remainingEdges);
 
-
-	// Recupera um Nodo em B para uma thread específica...
+	// Recupera um Nodo em B para o processamento da Thread corrente...
 	NodoGPU* Nodo = B->Device_Nodes()->Find(tid);
 	if (!Nodo) return;
 	long u = Nodo->key;
 	
-	// Adiciona o Nodo da thread, e tenta adicionar as Arestas remanescentes deste Nodo a A...
+	// Adiciona o Nodo da Thread, e tenta adicionar as Arestas remanescentes deste Nodo a At...
 	At->Device_addNode( u );
 	ProcessRemainingEdges_On_Device(u, RemEdgesT, At);
 
-	// Tentar adicionar as Arestas do Nodo a A...
+	// Tentar adicionar as Arestas do Nodo a At...
 	for (int i = 0; i < Nodo->Edges.Size(); i++) {
 		long v = (*Nodo->Edges.Pos(i));
 
-		// Se existir em A o outro Nodo da Aresta, entao insere a Aresta em A...
+		// Se existir em At o outro Nodo da Aresta, entao insere a Aresta em At...
 		if (At->Device_Contains(v)) {
 			At->Device_addEdge(u, v, Nodo->Edges.Size() );
-//		} else {
-//			// Caso contrario, coloca a Aresta na lista de remanescente...
-//			addRemainingEdge( u, v, remainingEdges );
+		} else {
+			// Caso contrario, coloca a Aresta na lista de remanescente...
+			RemEdgesT->Device_addEdge(u, v, Nodo->Edges.Size());
 		}
 	}
+
+	// Remove de Bt o Nodo recem processedaco na Thread corrente...
 	Bt->Device_delNode(u);
 
+	// Recalcula a condutância para At e Bt...
 	adcGraph* abEdges = getABEdges_Device(G, At, Bt);
-	(*pCNt[tid])      = calculateCN_Device(At, Bt, abEdges); // Theta(V+E)
+	pCNt[tid]         = calculateCN_Device(At, Bt, abEdges); // Theta(V+E)
 	delete abEdges;
-//	double CNt = calculateCN( At, Bt, abEdges ); // Theta(V+E)
 }
 
 
@@ -279,7 +266,7 @@ int main()
 		adcGraph At[SIZE_THREADS], Bt[SIZE_THREADS], RemEdgesT[SIZE_THREADS];
 		double  CNt[SIZE_THREADS];
 
-		ADC<<<1,SIZE_THREADS>>>(&G, &A, &B, &remainingEdges, &At, &Bt, &CNt, &RemEdgesT);
+		ADC<<<1,SIZE_THREADS>>>(&G, &A, &B, &remainingEdges, At, Bt, CNt, RemEdgesT);
 
 		// Procurando por um novo CN...
 		Continuar = false;
@@ -291,9 +278,9 @@ int main()
 				Bt[i].Host_CommitToLink();
 				RemEdgesT[i].Host_CommitToLink();
 
-				A.Device_to_Host();
-				B.Device_to_Host();
-				remainingEdges.Device_to_Host();
+//				A.Device_to_Host();
+//				B.Device_to_Host();
+//				remainingEdges.Device_to_Host();
 
 				delete abEdges;
 				abEdges = getABEdges_Host(&G, &A, &B); // Theta(V+E)

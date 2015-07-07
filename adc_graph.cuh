@@ -49,7 +49,7 @@ class adcGraph
 {
 public:
 	__host__ __device__ adcGraph();
-//	__host__ __device__ ~adcGraph();
+	__host__ __device__ ~adcGraph();
 
 	__host__ __device__ long Host_getEdgeCount();
 	__host__ __device__ bool Host_Contains(long u);
@@ -88,42 +88,24 @@ private:
 
 	hash_gpu<NodoGPU> _dvcNodes;
 	hash_cpu<NodoCPU> _hstNodes;
-
-	__host__ __device__ void LogDel(long u, long v=0 );
-
 };
 
 __host__ __device__ adcGraph::adcGraph()
 {
 	_QtdNodes  = 0;
 	_LinkGraph = 0;
+	_LogLinkDels.Clear();
+	_dvcNodes.Clear();
+	_hstNodes.Clear();
 }
 
-__host__ __device__ void adcGraph::LogDel(long u, long v=0 )
+__host__ __device__ adcGraph::~adcGraph()
 {
-	if (_LinkGraph) {
-		NodoGPU* Nodo = _LogLinkDels.Find(u);
-
-		// Se necessario adiciona o Nodo u...
-		if (Nodo && Nodo->key!=u && !pU->Edges.Prepared()) {
-			_hstNodes.Add(u);
-			pU = _hstNodes.Find(u);
-		}
-
-		// Se necessario inicia o vetor de Arestas do Nodo u...
-		if (pU->key == u && !pU->Edges.Prepared()) {
-			pU->Edges.Initialize(qtd);
-		}
-
-		// Se necessario adiciona ao Nodo u a Aresta v...
-		if (pU->key == u && pU->Edges.Prepared()) {
-			long* pV = pU->Edges.Find(v);
-			if ((*pV) != v) {
-				pU->Edges.Add(v);
-			}
-		}
-	}
+	_LogLinkDels.Clear();
+	_dvcNodes.Clear();
+	_hstNodes.Clear();
 }
+
 
 __device__ long adcGraph::GetNode(long U, int tid)
 {
@@ -242,6 +224,16 @@ __host__ __device__ long adcGraph::Device_getEdgeCount()
 		}
 
 		// Subtraíndo as Arestas eventualmente exluídas...
+		for (long i = 0; i < _LogLinkDels.Size(); i++) {
+			NodoGPU* Nodo = _LogLinkDels.Pos(i);
+			if (Nodo->key > 0) {
+				for (long j = 0; j < Nodo->Edges.Size(); j++) {
+					if ((*Nodo->Edges.Pos(j)) > 0) {
+						_QtdEdges--;
+					}
+				}
+			}
+		}
 	}
 
 	return _QtdEdges;
@@ -255,8 +247,27 @@ __host__ __device__ bool adcGraph::Device_Contains(long u)
 
 __host__ __device__ void adcGraph::Device_delNode(long u)
 {
-	_dvcNodes.Del(u);
-	this->LogDel(u);
+	// Se não possuir link com outro Grafo, então é necessário efetuar o log dos excluídos...
+	if (_LinkGraph) {
+
+		// Verifica se o Nodo u já foi adicionado ao log dos excluídos...
+		NodoGPU* Nodo = _LogLinkDels.Find(u);
+		if (Nodo && Nodo->key != u && !Nodo->Edges.Prepared()) {
+
+			// Adiciona o Nodo u ao log dos excluídos...
+			_LogLinkDels.Add(u);
+			Nodo = _LogLinkDels.Find(u);
+			long qtd = _LinkGraph->Device_Nodes()->Find(u)->Edges.Size();
+			Nodo->Edges.Initialize(qtd);
+
+			// Adiciona as Arestas do Nodo u ao logo dos excluídos...
+			for (long j = 0; j < Nodo->Edges.Size(); j++) {
+				long v = (*_LinkGraph->Device_Nodes()->Find(u)->Edges.Pos(j));
+				Nodo->Edges.Add(v);
+			}
+		}
+	}
+//	_dvcNodes.Del(u);
 }
 
 __host__ __device__ void adcGraph::Device_addNode(long u)
@@ -295,14 +306,31 @@ __host__ __device__ void adcGraph::Device_addEdge(long u, long v, long qtd)
 
 __host__ __device__ void adcGraph::Device_delEdge(long u, long v)
 {
-	NodoGPU* pU = _dvcNodes.Find(u);
+	// Se não possuir link com outro Grafo, então é necessário efetuar o log dos excluídos...
+	if (_LinkGraph) {
+
+		// Verifica se é necessário adicionar o Nodo u ao log dos excluídos...
+		NodoGPU* Nodo = _LogLinkDels.Find(u);
+		if (Nodo && Nodo->key != u && !Nodo->Edges.Prepared()) {
+			_LogLinkDels.Add(u);
+			Nodo = _LogLinkDels.Find(u);
+			long qtd = _LinkGraph->Device_Nodes()->Find(u)->Edges.Size();
+			Nodo->Edges.Initialize(qtd);
+		}
+
+		// Adicionanto a Aresta ao log dos excluídos...
+		long* pV = _LinkGraph->Device_Nodes()->Find(u)->Edges.Find(v);
+		if (pV && (*pV) == v) {
+			Nodo->Edges.Add(v);
+		}
+	}
+/*	NodoGPU* pU = _dvcNodes.Find(u);
 	if ( pU && pU->key==u ) {
 		long* pV = pU->Edges.Find(v);
 		if ( pV && (*pV)==v ) {
 			(*pV) = 0;
-			this->LogDel(u,v);
 		}
-	}
+	}*/
 }
 
 __host__ __device__ void adcGraph::Device_Clear()
@@ -354,7 +382,7 @@ __device__ void adcGraph::Device_LinkGraph(adcGraph* link)
 {
 	_LinkGraph = link;
 	_dvcNodes.Initialize( link->Size() );
-	_LinkDels.Initialize( link->Size() );
+	_LogLinkDels.Initialize( link->Size() );
 }
 
 
@@ -384,6 +412,9 @@ __host__  void adcGraph::Host_CommitToLink()
 			}
 		}
 	}
+
+	// Aplicando as alterações no Device do Link para o seu Host...
+	_LinkGraph->Device_to_Host();
 }
 
 
